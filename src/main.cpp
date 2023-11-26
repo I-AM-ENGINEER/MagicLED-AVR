@@ -153,7 +153,7 @@ void setup() {
 
 	TCCR1B = (1 << WGM12) | (1 << CS12);	// Prescaller 256, CTC
 	uint16_t prescaller = F_CPU/256/400; 	// 400 Hz 
-	OCR1AH = (uint8_t)((prescaller-1) << 8);
+	OCR1AH = (uint8_t)((prescaller-1) >> 8);
 	OCR1AL = (uint8_t)(prescaller-1);
 	TIMSK1 = (1 << OCIE1B);
 
