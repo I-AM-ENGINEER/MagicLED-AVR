@@ -34,9 +34,7 @@ const struct cRGB idle_color = {
 struct cRGB leds_buffer[LED_COUNT];
 
 ISR(TIMER0_COMPA_vect){	
-	uint32_t m = tick;
-	m++;
-	tick = m;
+	tick++;
 }
 
 ISR(TIMER1_COMPB_vect, ISR_NOBLOCK){}	// Hardware start ADC, no more
