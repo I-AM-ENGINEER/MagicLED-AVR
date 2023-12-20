@@ -8,7 +8,7 @@
 
 #define LED_VOLUME_BRIGHTNES_K			(2.5f)			// 0.5...10.0 More volume - more 
 #define LED_RAINBOW_PIXEL_DIF			(2)				// Set 0 for disable rainbow
-#define LED_RAINBOW_PERIOD				(16384)			// (ms), maybe should be power of 2, but not must
+#define LED_RAINBOW_PERIOD				(8192)			// (ms), maybe should be power of 2, but not must
 // Color, that will display inactive pixel
 #define LED_IDLE_COLOR_R				(30)			// Red   channel default
 #define LED_IDLE_COLOR_G				(0)				// Green channel default
@@ -18,8 +18,8 @@
 #define SLEEP_ENABLE 					(true)			// Automatic turn light off after music shut
 #if SLEEP_ENABLE
 #define SLEEP_TIME						(300)			// (s) After this time led strip will turn off if no music
-#define ADC_THRESHOLD_SLEEP				(10)				// (5...50) Volume below this value will be interpreted as silent (up if shit audiocable or amplifier)
-#define ADC_THRESHOLD_WAKE				(15)			// If volume greater, wakeup from sleep (up if random wakeup)
+#define ADC_THRESHOLD_SLEEP				(5)				// (5...50) Volume below this value will be interpreted as silent (up if shit audiocable or amplifier)
+#define ADC_THRESHOLD_WAKE				(10)			// If volume greater, wakeup from sleep (up if random wakeup)
 #define WAKEUP_TIME						(5)				// (s) Time for wakeup from sleep (for dont wakeup from system sound)
 #endif // SLEEP_ENABLE
 

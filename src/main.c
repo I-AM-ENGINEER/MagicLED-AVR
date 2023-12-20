@@ -5,9 +5,11 @@
 #include <avr/io.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "config.h"
 #include "light_ws2812.h"
+
 
 int16_t ADC_get_DC( void );
 int16_t ADC_get_short_amp( void );
@@ -37,7 +39,7 @@ ISR(TIMER0_COMPA_vect){
 	tick++;
 }
 
-ISR(TIMER1_COMPB_vect, ISR_NOBLOCK){}	// Hardware start ADC, no more
+ISR(TIMER1_COMPB_vect){}	// Hardware start ADC, no more
 
 ISR(ADC_vect){
 	adc_last_value = ADC;
@@ -162,7 +164,7 @@ int main(){
 	// TIM0 - millis
 	TCCR0A = (1 << WGM01); // CTC mode
 	TCCR0B = (1 << CS01) | (1 << CS00); // prescaller 64
-	OCR0A  = F_CPU/64/500 - 1; // One tick in milsecond
+	OCR0A  = F_CPU/64/1000 - 1; // One tick in milsecond
 	TIMSK0 = (1 << OCIE0A);
 
 	// TIM1 - ADC reading interval
@@ -192,6 +194,7 @@ int main(){
 		#endif
 		
 		if(sleep_mode){
+			memset(leds_buffer, 0, sizeof(leds_buffer));
 			if(ADC_get_long_amp() > ADC_THRESHOLD_WAKE){
 				if(sleep_timestamp == 0){
 					sleep_timestamp = get_tick();
