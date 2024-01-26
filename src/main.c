@@ -1,28 +1,29 @@
-#define F_CPU	16000000UL
-
 #include <avr/interrupt.h>
 #include <stdlib.h>
 #include <avr/io.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <avr/wdt.h>
+#include <util/delay.h>
 
 #include "config.h"
 #include "light_ws2812.h"
+#include "usart.h"
 
 
-int16_t ADC_get_DC( void );
-int16_t ADC_get_short_amp( void );
-int16_t ADC_get_long_amp( void );
+uint16_t ADC_get_short_amp( void );
+uint16_t ADC_get_long_amp( void );
 uint32_t get_tick( void );
 struct cRGB hsv2rgb(uint8_t h, uint8_t s, uint8_t v);
 struct cRGB get_pixel_color(uint16_t pixelN);
 void color_update( void );
 
 volatile uint32_t tick;
-volatile int32_t adc_dc_value;			// DC part of signal
-volatile int32_t adc_long_volume;		// For music volume adjust
-volatile int32_t adc_short_volume;		// For music change detection
+volatile uint16_t adc_dc_value;			// DC part of signal
+volatile uint32_t adc_long_volume;		// For music volume adjust
+volatile uint32_t adc_short_volume;		// For music change detection
+
 volatile int16_t adc_last_value;
 uint8_t hsv_color;
 uint8_t hsv_brightness;
@@ -39,27 +40,67 @@ ISR(TIMER0_COMPA_vect){
 	tick++;
 }
 
-ISR(TIMER1_COMPB_vect){}	// Hardware start ADC, no more
+EMPTY_INTERRUPT(TIMER1_COMPB_vect);	// Hardware start ADC, no more
+
+#define MWSPT_NSEC 3
+#define Q_FACTOR 8 // Q8 format for fixed-point arithmetic
+#define SATURATE(x) ((x) > 127 ? 127 : ((x) < -128 ? -128 : (x)))
+
+const int8_t NL[MWSPT_NSEC] = {1, 2, 1};
+const int8_t NUM[MWSPT_NSEC][2] = {
+    {20, 0},   // Coefficients scaled to Q8 format (2^8 = 256)
+    {127, 127}, // Coefficients scaled to Q8 format (1)
+    {127, 0}   // Coefficients scaled to Q8 format (1)
+};
+const int8_t DL[MWSPT_NSEC] = {1, 2, 1};
+const int8_t DEN[MWSPT_NSEC][2] = {
+    {127, 0},   // Coefficients scaled to Q8 format (1)
+    {127, -105}, // Coefficients scaled to Q8 format (0.9690673947 * 2^8)
+    {127, 0}    // Coefficients scaled to Q8 format (1)
+};
+
+
 
 ISR(ADC_vect){
-	adc_last_value = ADC;
-	int16_t current_volume = abs(ADC_get_DC() - adc_last_value);
+	static uint8_t i;
+	static int16_t filter_lowfreq;
+	static uint8_t dc_filtred;
+	static uint16_t current_volume;
 
-	adc_dc_value += adc_last_value - ADC_get_DC();
-	adc_short_volume += current_volume - ADC_get_short_amp();
-	adc_long_volume += current_volume - ADC_get_long_amp();
+	uint8_t adc_value = ADCH;
+
+	uint8_t filter_lowfreq_out = (uint8_t)(filter_lowfreq >> LOWFREQ_FILTER_ORDER);
+	filter_lowfreq += (int16_t)adc_value - (int16_t)filter_lowfreq_out;
+
+	// filtering
+	current_volume += abs((int16_t)filter_lowfreq_out - (int16_t)dc_filtred);
+
+	if(!--i){
+		i = 32;
+
+		dc_filtred = (uint8_t)(adc_dc_value >> 8);
+		adc_dc_value += (int16_t)filter_lowfreq_out - (int16_t)dc_filtred;
+
+		// for prevent pixel jitter
+		static uint16_t prefilter;
+		uint16_t prefilter_filtered = (uint16_t)(prefilter >> 3);
+		prefilter += (int16_t)current_volume - (int16_t)prefilter_filtered;
+
+		uint16_t adc_short_filtered = (uint16_t)(adc_short_volume >> ADC_SHORT_AMP_FILTER_ORDER);
+		adc_short_volume += (int16_t)prefilter_filtered - (int16_t)adc_short_filtered;
+
+		uint16_t adc_long_filter = (uint16_t)(adc_long_volume >> ADC_LONG_AMP_FILTER_ORDER);
+		adc_long_volume += (int16_t)current_volume - (int16_t)adc_long_filter;
+		current_volume = 0;
+	}
 }
 
-int16_t ADC_get_DC( void ){
-	return (int16_t)(adc_dc_value >> ADC_DC_FILTER_ORDER);
+inline uint16_t ADC_get_short_amp( void ){
+	return (uint16_t)(adc_short_volume >> ADC_SHORT_AMP_FILTER_ORDER);
 }
 
-int16_t ADC_get_short_amp( void ){
-	return (int16_t)(adc_short_volume >> ADC_SHORT_AMP_FILTER_ORDER);
-}
-
-int16_t ADC_get_long_amp( void ){
-	return (int16_t)(adc_long_volume >> ADC_LONG_AMP_FILTER_ORDER);
+inline uint16_t ADC_get_long_amp( void ){
+	return (uint16_t)(adc_long_volume >> ADC_LONG_AMP_FILTER_ORDER);
 }
 
 uint32_t get_tick( void ){
@@ -127,11 +168,20 @@ void strip_fill( void ){
 	const uint16_t led_count = LED_COUNT;
 	#endif
 
-	uint16_t volume_level_min = ADC_get_long_amp() * LED_MIN_VALUE_K;
-	uint16_t volume_level_max = ADC_get_long_amp() * LED_MAX_VALUE_K;
+	uint16_t volume_level_min = (uint16_t)((float)ADC_get_long_amp() * LED_MIN_VALUE_K);
+	uint16_t volume_level_max = (uint16_t)((float)ADC_get_long_amp() * LED_MAX_VALUE_K);
 	uint16_t volume_current = ADC_get_short_amp();
-	uint16_t led_count_active;
 
+	#if !ALLOW_OVERFLOW
+	if((volume_current < volume_level_min)){
+		adc_long_volume = ((uint32_t)((float)volume_current/LED_MIN_VALUE_K) << ADC_LONG_AMP_FILTER_ORDER);
+	}
+	if (volume_current > volume_level_max){
+		adc_long_volume = ((uint32_t)((float)volume_current/LED_MAX_VALUE_K) << ADC_LONG_AMP_FILTER_ORDER);
+	}
+	#endif
+	
+	uint16_t led_count_active;
 	if(volume_current < volume_level_min){
 		led_count_active = 0;
 	}else if(volume_current > volume_level_max){
@@ -139,7 +189,7 @@ void strip_fill( void ){
 	}else{
 		led_count_active = (uint32_t)led_count * (uint32_t)(volume_current - volume_level_min) / (uint32_t)(volume_level_max - volume_level_min);
 	}
-
+	
 	#if LED_CENTERED
 	for(uint16_t i = 0; i < (led_count - led_count_active); i++){
 		leds_buffer[i] = idle_color;
@@ -161,6 +211,9 @@ void strip_fill( void ){
 }
 
 int main(){
+	wdt_enable(WDTO_1S);
+	//usart_init(USART_baudrate_1000000);
+
 	// TIM0 - millis
 	TCCR0A = (1 << WGM01); // CTC mode
 	TCCR0B = (1 << CS01) | (1 << CS00); // prescaller 64
@@ -168,24 +221,24 @@ int main(){
 	TIMSK0 = (1 << OCIE0A);
 
 	// TIM1 - ADC reading interval
-	TCCR1B = (1 << WGM12) | (1 << CS12);	// Prescaller 256, CTC
-	uint16_t prescaller = F_CPU/256/1000; 	// 1kHz ADC reading 
+	TCCR1B = (1 << WGM12) | (1 << CS10);	// Prescaller 1, CTC
+	uint16_t prescaller = F_CPU/40000; 	// 40KSPs ADC reading
 	OCR1AH = (uint8_t)((prescaller-1) >> 8);
 	OCR1AL = (uint8_t)(prescaller-1);
 	TIMSK1 = (1 << OCIE1B);
 
 	// ADC init
-	ADMUX = (0b0111 << MUX0) | (0b11 << REFS0); //A7 pin
-	ADCSRA = (1 << ADEN) | (1 << ADIE) | (0b111 << ADPS0) | (1 << ADATE); // prescaller 128, yes, fuck f/2
+	ADMUX = (ADC_PIN_NUM << MUX0) | (0b11 << REFS0) | (1 << ADLAR); // 8 bit ADC mode (right aligment)
+	ADCSRA = (1 << ADEN) | (1 << ADIE) | (0b100 << ADPS0) | (1 << ADATE); // prescaller 16, 1MHz convertion, max speed of ADC, 8.5 bit accuracy
 	ADCSRB = (0b101 << ADTS0);
 
-	DDRC = (1 << PC0) | (1 << PC1);
+	DDRC = (1 << PC0);
 
 	sei();
 
 	while(1) {
+		wdt_reset();
 		static bool sleep_mode = false;
-		static uint32_t timestamp;
 		static uint32_t sleep_timestamp;
 
 		#if !SLEEP_ENABLE
@@ -194,7 +247,13 @@ int main(){
 		#endif
 		
 		if(sleep_mode){
-			memset(leds_buffer, 0, sizeof(leds_buffer));
+			for(uint16_t i = 0; i < LED_COUNT; i++){
+				if(leds_buffer[i].r != 0) leds_buffer[i].r--;
+				if(leds_buffer[i].g != 0) leds_buffer[i].g--;
+				if(leds_buffer[i].b != 0) leds_buffer[i].b--;
+			}
+			_delay_ms(100);
+
 			if(ADC_get_long_amp() > ADC_THRESHOLD_WAKE){
 				if(sleep_timestamp == 0){
 					sleep_timestamp = get_tick();
@@ -206,26 +265,46 @@ int main(){
 				sleep_timestamp = 0;
 			}
 		}else{
-			color_update();
-			strip_fill();
+			bool ready = true;
+			if(leds_buffer[0].r < LED_IDLE_COLOR_R){
+				for(uint16_t i = 0; i < LED_COUNT; i++){
+					leds_buffer[i].r++;
+				}
+				ready = false;
+			}
+			if(leds_buffer[0].g < LED_IDLE_COLOR_G){
+				for(uint16_t i = 0; i < LED_COUNT; i++){
+					leds_buffer[i].g++;
+				}
+				ready = false;
+			} 
+			if(leds_buffer[0].b < LED_IDLE_COLOR_B){
+				for(uint16_t i = 0; i < LED_COUNT; i++){
+					leds_buffer[i].b++;
+				}
+				ready = false;
+			} 
+			if(ready){
+				color_update();
+				strip_fill();
 
-			if(ADC_get_long_amp() < ADC_THRESHOLD_SLEEP){
-				if(sleep_timestamp == 0){
-					sleep_timestamp = get_tick();
-				}else if((get_tick() - sleep_timestamp) > (SLEEP_TIME * 1000UL)){
-					sleep_mode = true;
+				if(ADC_get_long_amp() < ADC_THRESHOLD_SLEEP){
+					if(sleep_timestamp == 0){
+						sleep_timestamp = get_tick();
+					}else if((get_tick() - sleep_timestamp) > (SLEEP_TIME * 1000UL)){
+						sleep_mode = true;
+						sleep_timestamp = 0;
+					}
+				}else{
 					sleep_timestamp = 0;
 				}
 			}else{
-				sleep_timestamp = 0;
+				_delay_ms(50);
+				adc_short_volume = 0;
 			}
 		}
-		
-		
 		strip_write();
-		PORTC &= ~(1 << PC1);
-		while((get_tick() - timestamp) < LED_UPDATE_PERIOD);
-		timestamp = get_tick();
-		PORTC |= (1 << PC1);
+
+		//char tttt[100];
 	}
 }

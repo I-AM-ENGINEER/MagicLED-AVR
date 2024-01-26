@@ -1,18 +1,22 @@
 #ifndef __PROJECT_CONFIG_H
 #define __PROJECT_CONFIG_H
 
+#define ADC_PIN_NUM                     7
+
 #define LED_PIN							2				// PIN of atmega ws2812 signal
 #define LED_PORT						D				// PORT of atmega ws2812 signal
 #define LED_COUNT						(122)			// Count led in sequential connection
 #define LED_CENTERED					(true)			// Start animation from center of led strip
 
-#define LED_VOLUME_BRIGHTNES_K			(2.5f)			// 0.5...10.0 More volume - more 
+#define LED_VOLUME_BRIGHTNES_K			(0.6f)			// 0.5...10.0 More volume - more 
 #define LED_RAINBOW_PIXEL_DIF			(2)				// Set 0 for disable rainbow
 #define LED_RAINBOW_PERIOD				(8192)			// (ms), maybe should be power of 2, but not must
 // Color, that will display inactive pixel
 #define LED_IDLE_COLOR_R				(30)			// Red   channel default
 #define LED_IDLE_COLOR_G				(0)				// Green channel default
 #define LED_IDLE_COLOR_B				(60)			// Blue  channel default
+
+#define ALLOW_OVERFLOW                  (false)         // If music change volume, sometimes strip full brigth or dark on some soconds, this option prevent this
 
 // Sleep and wakeup
 #define SLEEP_ENABLE 					(true)			// Automatic turn light off after music shut
@@ -23,14 +27,19 @@
 #define WAKEUP_TIME						(5)				// (s) Time for wakeup from sleep (for dont wakeup from system sound)
 #endif // SLEEP_ENABLE
 
-#define ADC_DC_FILTER_ORDER				(10)			// 8...16 DC signal value, bigger value - more stable, but longer startup
-#define ADC_LONG_AMP_FILTER_ORDER		(10)				// 6...12, bigger value - faster reaction on volume change
-#define ADC_SHORT_AMP_FILTER_ORDER		(7)				// 4...10, bigger value - softer led rise/fall
+#define ADC_LONG_AMP_FILTER_ORDER		(10)			// 6...14, bigger value - faster reaction on volume change
+#define ADC_SHORT_AMP_FILTER_ORDER		(6)				// 4...10, bigger value - softer led rise/fall
 
 #define LED_MIN_VALUE_K					(0.5f)			// 0...1.0, offset zero from relative from volume
 #define LED_MAX_VALUE_K					(1.3f)			// 1.0...2.0, max led value, relative from volume
 
-#define LED_UPDATE_PERIOD               (20)            // (ms) 20 ms - 50Hz refresh rate
+// Cutoff high freq from input signal (noise reduction)
+// 6: -20dB 1kHz; 0dB 100Hz
+// 5: -20dB 2kHz; 0dB 200Hz
+// 4: -20dB 4kHz; 0dB 400Hz
+// 3: -20dB 9kHz; 0dB 800Hz
+// 2: -20dB 20kHz; 0dB 1600Hz
+#define LOWFREQ_FILTER_ORDER            (4)
 
 // For lib
 

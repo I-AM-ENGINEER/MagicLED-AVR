@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "usart.h": "c",
+        "stdlib.h": "c",
+        "interrupt.h": "c",
+        "usart_bands.h": "c",
+        "pgmspace.h": "c",
+        "config.h": "c",
+        "light_ws2812.h": "c"
+    }
+}
