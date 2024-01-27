@@ -5,7 +5,7 @@
 
 #define LED_PIN							2				// PIN of atmega ws2812 signal
 #define LED_PORT						D				// PORT of atmega ws2812 signal
-#define LED_COUNT						(122)			// Count led in sequential connection
+#define LED_COUNT						(122)			// Count led in sequential connection122
 #define LED_CENTERED					(true)			// Start animation from center of led strip
 
 #define LED_VOLUME_BRIGHTNES_K			(0.3f)			// 0.1...10.0 More volume - more 
@@ -33,13 +33,16 @@
 #define LED_MIN_VALUE_K					(0.5f)			// 0...1.0, offset zero from relative from volume
 #define LED_MAX_VALUE_K					(1.3f)			// 1.0...2.0, max led value, relative from volume
 
+// Config mode - configuration with audio
+#define CONFIG_MODE_THRESHOLD           (20)            // 10...100, bigger value - harder enter in config, but lower chanse random config mode enter
+
 // Cutoff high freq from input signal (noise reduction)
 // 6: -20dB 1kHz; 0dB 100Hz
 // 5: -20dB 2kHz; 0dB 200Hz
 // 4: -20dB 4kHz; 0dB 400Hz
 // 3: -20dB 9kHz; 0dB 800Hz
 // 2: -20dB 20kHz; 0dB 1600Hz
-#define LOWFREQ_FILTER_ORDER            (4)
+#define LOWFREQ_FILTER_ORDER            (3)
 
 // For lib
 
