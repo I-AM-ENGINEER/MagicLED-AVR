@@ -23,6 +23,9 @@ volatile uint32_t tick;
 volatile uint16_t adc_dc_value;			// DC part of signal
 volatile uint32_t adc_long_volume;		// For music volume adjust
 volatile uint32_t adc_short_volume;		// For music change detection
+volatile bool config_mode;
+volatile uint8_t filter_2500Hz_out;
+volatile bool filter_2500Hz_updated;
 
 volatile int16_t adc_last_value;
 uint8_t hsv_color;
@@ -42,6 +45,147 @@ ISR(TIMER0_COMPA_vect){
 
 EMPTY_INTERRUPT(TIMER1_COMPB_vect);	// Hardware start ADC, no more
 
+//IIR filter
+//using direct form  
+//normalized to unity gain, and with a(1)=1
+// a(1)*y(n) = b(1)*x(n) + b(2)*x(n-1) + ... + b(nb+1)*x(n-nb)
+//                       - a(2)*y(n-1) - ... - a(na+1)*y(n-na)    
+// Bruce Land -- Cornell University -- June 2008
+
+// Fast fixed point multiply assembler macro
+#define multfix(a,b)          	  \
+({                                \
+int prod, val1=a, val2=b ;        \
+__asm__ __volatile__ (            \
+"muls %B1, %B2	\n\t"              \
+"mov %B0, r0 \n\t"	               \
+"mul %A1, %A2\n\t"	               \
+"mov %A0, r1   \n\t"              \
+"mulsu %B1, %A2	\n\t"          \
+"add %A0, r0  \n\t"               \
+"adc %B0, r1 \n\t"                \
+"mulsu %B2, %A1	\n\t"          \
+"add %A0, r0 \n\t"           \
+"adc %B0, r1  \n\t"          \
+"clr r1  \n\t" 		         \
+: "=&d" (prod)               \
+: "a" (val1), "a" (val2)      \
+);                            \
+prod;                        \
+})
+
+//IIR state variables
+int b1,b2,b3,a2,a3;
+int xn, xn_1, xn_2;
+int yn_1, yn_2;
+
+//float-fix conversion macros
+#define float2fix(a) ((int)((a)*256.0)) 
+#define fix2float(a) ((double)(a)/256.0)
+
+int IIR2_2(int xx){
+	//peak filter 20KSPs, 2.5KHz peack
+	//IIR state variables
+	const int b1 = float2fix(0.030);
+	const int b2 = float2fix(0.0);
+	const int b3 = float2fix(-0.030);
+	const int a2 = float2fix(1.84);   //note that sign is negated from design input
+	const int a3 = float2fix(-0.94);  //note that sign is negated from design input
+	static int xn_1, xn_2;
+	static int yn_1, yn_2;
+
+    int yy; 
+    // sum the 5 terms: yy += xx*coeff 
+	// and update the state variables
+	// as soon as possible
+	yy = multfix(xn_2,b3);
+	xn_2 = xn_1;
+	yy = yy + multfix(xn_1,b2);
+	xn_1 = xx;
+	yy = yy + multfix(xx,b1);
+	yy = yy + multfix(yn_2,a3); 
+	yn_2 = yn_1;
+	yy = yy + multfix(yn_1,a2); 
+    yn_1 = yy;
+    return yy;
+}
+
+int IIR2(int xx){
+	//peak filter 20KSPs, 2.5KHz peack
+	//IIR state variables
+	const int b1 = float2fix(0.0053);
+	const int b2 = float2fix(0.0);
+	const int b3 = float2fix(-0.0053);
+	const int a2 = float2fix(1.406);   //note that sign is negated from design input
+	const int a3 = float2fix(-0.98);  //note that sign is negated from design input
+	static int xn_1, xn_2;
+	static int yn_1, yn_2;
+
+    int yy; 
+    // sum the 5 terms: yy += xx*coeff 
+	// and update the state variables
+	// as soon as possible
+	yy = multfix(xn_2,b3);
+	xn_2 = xn_1;
+	yy = yy + multfix(xn_1,b2);
+	xn_1 = xx;
+	yy = yy + multfix(xx,b1);
+	yy = yy + multfix(yn_2,a3); 
+	yn_2 = yn_1;
+	yy = yy + multfix(yn_1,a2); 
+    yn_1 = yy;
+    return yy;
+}
+
+// Should be called 20KHz
+void detect_preamble(int16_t signal){
+	static uint8_t k = 50;
+	static uint16_t filter_2500Hz;
+	
+	uint16_t peak_2500Hz = (uint16_t)abs(IIR2((int)signal*256)/4);
+	
+	if(peak_2500Hz > 255){
+		peak_2500Hz = 255;
+	}
+	filter_2500Hz_out = (uint8_t)(filter_2500Hz >> 5);
+	filter_2500Hz += (int16_t)peak_2500Hz - (int16_t)filter_2500Hz_out;
+	filter_2500Hz_updated = true;
+	// Process 400SPs
+	if(!--k){
+		static uint8_t j = 200;
+		static uint16_t filter_20Hz;
+		static uint8_t delay_loop[2] = {255};
+		static uint8_t delay_loop_i;
+
+		if(config_mode){
+			return;
+		}
+
+		uint16_t peak_20Hz = (uint16_t)abs(IIR2_2(((int)((int16_t)filter_2500Hz_out))*256)/32);
+		uint8_t filter_20Hz_out = (uint8_t)(filter_20Hz >> 6);
+		filter_20Hz += (int16_t)peak_20Hz - (int16_t)filter_20Hz_out;
+
+		// 2SPs for delay loop for current volume/last volume compare for prevent fail preambule detection
+		if(!--j){
+			delay_loop[delay_loop_i] = filter_20Hz_out;
+			if(delay_loop[delay_loop_i] < 3){
+				delay_loop[delay_loop_i] = 3;
+			}
+			delay_loop_i++;
+			if(delay_loop_i == sizeof(delay_loop)){
+				delay_loop_i = 0;
+			}
+			j = 200;
+		}
+		uint8_t s = (((uint16_t)filter_20Hz_out * 256) / (uint16_t)delay_loop[delay_loop_i])/64;
+		if(s > CONFIG_MODE_THRESHOLD){
+			memset(delay_loop, 255, sizeof(delay_loop));
+			config_mode = true;
+		}
+		k = 50;
+	}
+}
+
 ISR(ADC_vect){
 	static uint8_t i;
 	static int16_t filter_lowfreq;
@@ -53,25 +197,32 @@ ISR(ADC_vect){
 	uint8_t filter_lowfreq_out = (uint8_t)(filter_lowfreq >> LOWFREQ_FILTER_ORDER);
 	filter_lowfreq += (int16_t)adc_value - (int16_t)filter_lowfreq_out;
 
-	// filtering
-	current_volume += abs((int16_t)filter_lowfreq_out - (int16_t)dc_filtred);
+	int16_t adc_ac = (int16_t)filter_lowfreq_out - (int16_t)dc_filtred;
 
+	// Process 20KSps
+	if(i & 1){
+		detect_preamble(adc_ac);
+	}
+
+	current_volume += abs(adc_ac);
 	if(!--i){
 		i = 32;
-
+		if(config_mode){
+			return;
+		}
 		dc_filtred = (uint8_t)(adc_dc_value >> 8);
-		adc_dc_value += (int16_t)filter_lowfreq_out - (int16_t)dc_filtred;
+		adc_dc_value += adc_ac;
 
 		// for prevent pixel jitter
 		static uint16_t prefilter;
 		uint16_t prefilter_filtered = (uint16_t)(prefilter >> 3);
 		prefilter += (int16_t)current_volume - (int16_t)prefilter_filtered;
 
-		uint16_t adc_short_filtered = (uint16_t)(adc_short_volume >> ADC_SHORT_AMP_FILTER_ORDER);
-		adc_short_volume += (int16_t)prefilter_filtered - (int16_t)adc_short_filtered;
+		uint16_t adc_short_filtered_out = (uint16_t)(adc_short_volume >> ADC_SHORT_AMP_FILTER_ORDER);
+		adc_short_volume += (int16_t)prefilter_filtered - (int16_t)adc_short_filtered_out;
 
-		uint16_t adc_long_filter = (uint16_t)(adc_long_volume >> ADC_LONG_AMP_FILTER_ORDER);
-		adc_long_volume += (int16_t)current_volume - (int16_t)adc_long_filter;
+		uint16_t adc_long_filter_out = (uint16_t)(adc_long_volume >> ADC_LONG_AMP_FILTER_ORDER);
+		adc_long_volume += (int16_t)current_volume - (int16_t)adc_long_filter_out;
 		current_volume = 0;
 	}
 }
@@ -192,8 +343,8 @@ void strip_fill( void ){
 }
 
 int main(){
-	wdt_enable(WDTO_1S);
-	//usart_init(USART_baudrate_1000000);
+	wdt_enable(WDTO_2S);
+	usart_init(USART_baudrate_1000000);
 
 	// TIM0 - millis
 	TCCR0A = (1 << WGM01); // CTC mode
@@ -230,6 +381,38 @@ int main(){
 		sleep_timestamp == 0;
 		#endif
 		
+		if(config_mode){
+			for(uint16_t i = 0; i < LED_COUNT; i++){
+				leds_buffer[i].r = 0;
+				leds_buffer[i].g = 0;
+				leds_buffer[i].b = 120;
+			}
+			strip_write();
+			// Выключить АЦП
+			//ADCSRA &= ~(1 << ADIE);
+
+			
+			for(uint32_t i = 0; i < 100000; i++){
+				filter_2500Hz_updated = false;
+				while (!filter_2500Hz_updated);
+				
+				UDR0 = filter_2500Hz_out;
+				//uint16_t peak_20Hz = (uint16_t)abs(IIR2_2(((int)((int16_t)filter_2500Hz_out))*256)/32);
+				//UDR0 = peak_20Hz;
+				//uint16_t peak_20Hz = (uint16_t)abs(IIR2_2(((int)((int16_t)filter_2500Hz_out))*256)/32);
+				wdt_reset();
+			}
+
+
+
+			// Включить перывания АЦП
+			//ADCSRA |= (1 << ADIE);
+			for(uint16_t i = 0; i < LED_COUNT; i++){
+				leds_buffer[i] = idle_color;
+			}
+			config_mode = false;
+		}
+
 		if(sleep_mode){
 			for(uint16_t i = 0; i < LED_COUNT; i++){
 				if(leds_buffer[i].r != 0) leds_buffer[i].r--;
