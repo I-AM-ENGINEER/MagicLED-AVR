@@ -42,25 +42,6 @@ ISR(TIMER0_COMPA_vect){
 
 EMPTY_INTERRUPT(TIMER1_COMPB_vect);	// Hardware start ADC, no more
 
-#define MWSPT_NSEC 3
-#define Q_FACTOR 8 // Q8 format for fixed-point arithmetic
-#define SATURATE(x) ((x) > 127 ? 127 : ((x) < -128 ? -128 : (x)))
-
-const int8_t NL[MWSPT_NSEC] = {1, 2, 1};
-const int8_t NUM[MWSPT_NSEC][2] = {
-    {20, 0},   // Coefficients scaled to Q8 format (2^8 = 256)
-    {127, 127}, // Coefficients scaled to Q8 format (1)
-    {127, 0}   // Coefficients scaled to Q8 format (1)
-};
-const int8_t DL[MWSPT_NSEC] = {1, 2, 1};
-const int8_t DEN[MWSPT_NSEC][2] = {
-    {127, 0},   // Coefficients scaled to Q8 format (1)
-    {127, -105}, // Coefficients scaled to Q8 format (0.9690673947 * 2^8)
-    {127, 0}    // Coefficients scaled to Q8 format (1)
-};
-
-
-
 ISR(ADC_vect){
 	static uint8_t i;
 	static int16_t filter_lowfreq;
@@ -150,8 +131,8 @@ struct cRGB get_pixel_color(uint16_t pixelN){
 void color_update( void ){
 	hsv_color = (uint8_t)((get_tick() % (uint32_t)LED_RAINBOW_PERIOD) * 255UL / (uint32_t)LED_RAINBOW_PERIOD);
 	uint16_t brightness = (uint16_t)((float)ADC_get_long_amp() * LED_VOLUME_BRIGHTNES_K);
-	if(brightness > 255){
-		brightness = 255;
+	if(brightness > LED_MAX_BRIGHTNESS){
+		brightness = LED_MAX_BRIGHTNESS;
 	}
 	hsv_brightness = brightness;
 }
@@ -228,11 +209,14 @@ int main(){
 	TIMSK1 = (1 << OCIE1B);
 
 	// ADC init
-	ADMUX = (ADC_PIN_NUM << MUX0) | (0b11 << REFS0) | (1 << ADLAR); // 8 bit ADC mode (right aligment)
+	ADMUX = (ADC_PIN_NUM << MUX0) | (1 << ADLAR); // 8 bit ADC mode (right aligment)
 	ADCSRA = (1 << ADEN) | (1 << ADIE) | (0b100 << ADPS0) | (1 << ADATE); // prescaller 16, 1MHz convertion, max speed of ADC, 8.5 bit accuracy
 	ADCSRB = (0b101 << ADTS0);
 
-	DDRC = (1 << PC0);
+	// AVCC as reference
+	#if ADC_REFERENCE_VOLTAGE == 0
+	ADMUX |= (1 << REFS1) | (1 << REFS0);
+	#endif
 
 	sei();
 
@@ -304,7 +288,5 @@ int main(){
 			}
 		}
 		strip_write();
-
-		//char tttt[100];
 	}
 }

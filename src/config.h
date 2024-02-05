@@ -1,7 +1,14 @@
 #ifndef __PROJECT_CONFIG_H
 #define __PROJECT_CONFIG_H
 
+// A7 on arduino nano, can be any analog pin
 #define ADC_PIN_NUM                     7
+
+// 0 - 1.1V, input signal should be 0.5-0.6V DC component
+// use this settings for get signal from headphones/speakers line
+// 1 - AREF (3.3V), input signal should be 1-2V DC component
+// use this settings for microphone, like MAX9814 or MAX4466 without external componets
+#define ADC_REFERENCE_VOLTAGE           1
 
 #define LED_PIN							2				// PIN of atmega ws2812 signal
 #define LED_PORT						D				// PORT of atmega ws2812 signal
@@ -15,6 +22,7 @@
 #define LED_IDLE_COLOR_R				(30)			// Red   channel default
 #define LED_IDLE_COLOR_G				(0)				// Green channel default
 #define LED_IDLE_COLOR_B				(60)			// Blue  channel default
+#define LED_MAX_BRIGHTNESS              (255)           // 10...255, drop this value down, if shitty power supply
 
 #define ALLOW_OVERFLOW                  (false)         // If music change volume, sometimes strip full brigth or dark on some soconds, this option prevent this
 
