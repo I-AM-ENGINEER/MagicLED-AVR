@@ -216,6 +216,8 @@ int main(){
 	// AVCC as reference
 	#if ADC_REFERENCE_VOLTAGE == 0
 	ADMUX |= (1 << REFS1) | (1 << REFS0);
+	#else
+	ADMUX |= (0b11 << REFS0);
 	#endif
 
 	sei();
