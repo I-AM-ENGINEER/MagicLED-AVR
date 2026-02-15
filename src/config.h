@@ -41,6 +41,7 @@
 #define LED_MIN_VALUE_K					(0.5f)			// 0...1.0, offset zero from relative from volume
 #define LED_MAX_VALUE_K					(1.3f)			// 1.0...2.0, max led value, relative from volume
 
+#define BOOT_TOGGLE_ENABLE              (true)          // 1 = use parity-based switching, 0 = always sound-reactive lighting
 // Cutoff high freq from input signal (noise reduction)
 // 6: -20dB 1kHz; 0dB 100Hz
 // 5: -20dB 2kHz; 0dB 200Hz

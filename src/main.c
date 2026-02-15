@@ -10,7 +10,7 @@
 #include "config.h"
 #include "light_ws2812.h"
 #include "usart.h"
-
+#include <avr/eeprom.h>
 
 uint16_t ADC_get_short_amp( void );
 uint16_t ADC_get_long_amp( void );
@@ -27,6 +27,8 @@ volatile uint32_t adc_short_volume;		// For music change detection
 volatile int16_t adc_last_value;
 uint8_t hsv_color;
 uint8_t hsv_brightness;
+
+uint8_t EEMEM ee_boot_cnt;
 
 const struct cRGB idle_color = {
 	.r = LED_IDLE_COLOR_R,
@@ -191,6 +193,12 @@ void strip_fill( void ){
 	#endif
 }
 
+void strip_fill_static( struct cRGB c ){
+    for(uint16_t i = 0; i < LED_COUNT; i++){
+        leds_buffer[i] = c;
+    }
+}
+
 int main(){
 	wdt_enable(WDTO_1S);
 	//usart_init(USART_baudrate_1000000);
@@ -221,6 +229,15 @@ int main(){
 	#endif
 
 	sei();
+	
+	#if BOOT_TOGGLE_ENABLE
+		uint8_t boot_cnt = eeprom_read_byte(&ee_boot_cnt);
+		boot_cnt++;
+		eeprom_update_byte(&ee_boot_cnt, boot_cnt);
+
+		bool music_mode = ((boot_cnt & 1) != 0);
+	#endif
+	
 
 	while(1) {
 		wdt_reset();
@@ -231,6 +248,16 @@ int main(){
 		sleep_mode = false;
 		sleep_timestamp == 0;
 		#endif
+
+		#if BOOT_TOGGLE_ENABLE
+			if(!music_mode){
+				strip_fill_static(idle_color);
+				strip_write();
+				_delay_ms(20);
+				continue;
+			}
+		#endif
+
 		
 		if(sleep_mode){
 			for(uint16_t i = 0; i < LED_COUNT; i++){
